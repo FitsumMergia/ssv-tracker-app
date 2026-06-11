@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+  <title>SSV Site Tracker</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        var(--tg-theme-bg-color, #ffffff);
+      --bg2:       var(--tg-theme-secondary-bg-color, #f4f4f5);
+      --text:      var(--tg-theme-text-color, #111111);
+      --hint:      var(--tg-theme-hint-color, #888888);
+      --link:      var(--tg-theme-link-color, #2481cc);
+      --btn:       var(--tg-theme-button-color, #2481cc);
+      --btn-text:  var(--tg-theme-button-text-color, #ffffff);
+      --accent:    #2481cc;
+      --red:       #e53935;
+      --green:     #43a047;
+      --orange:    #fb8c00;
+      --radius:    10px;
+      --font:      -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding-bottom: env(safe-area-inset-bottom, 16px);
+    }
+
+    /* ── Screens ── */
+    .screen { display: none; padding: 16px; animation: fadeIn .15s ease; }
+    .screen.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* ── Header ── */
+    .header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--bg2);
+      position: sticky; top: 0; background: var(--bg); z-index: 10;
+    }
+    .header h1 { font-size: 16px; font-weight: 700; flex: 1; }
+    .back-btn {
+      background: none; border: none; color: var(--link);
+      font-size: 14px; cursor: pointer; padding: 4px 0;
+    }
+
+    /* ── Search Screen ── */
+    .search-wrap { margin-top: 20px; }
+    .search-input-row {
+      display: flex; gap: 8px;
+    }
+    .search-input {
+      flex: 1;
+      border: 1.5px solid var(--bg2);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      font-size: 15px;
+      background: var(--bg2);
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s;
+    }
+    .search-input:focus { border-color: var(--accent); background: var(--bg); }
+    .btn {
+      background: var(--btn);
+      color: var(--btn-text);
+      border: none; border-radius: var(--radius);
+      padding: 12px 18px; font-size: 14px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .btn:active { opacity: .8; }
+    .btn-outline {
+      background: none; border: 1.5px solid var(--btn);
+      color: var(--btn);
+    }
+    .btn-block { width: 100%; margin-top: 10px; padding: 14px; }
+
+    /* Search results list */
+    .result-list { margin-top: 14px; }
+    .result-item {
+      background: var(--bg2);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .result-item:active { opacity: .7; }
+    .result-item .site-id { font-weight: 700; font-size: 14px; color: var(--accent); }
+    .result-item .meta { font-size: 12px; color: var(--hint); margin-top: 3px; }
+
+    /* ── Dashboard Screen ── */
+    .dash-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 10px; margin-top: 16px;
+    }
+    .stat-card {
+      background: var(--bg2); border-radius: var(--radius);
+      padding: 16px 12px; text-align: center;
+    }
+    .stat-card .num {
+      font-size: 28px; font-weight: 800; line-height: 1;
+    }
+    .stat-card .label { font-size: 11px; color: var(--hint); margin-top: 5px; }
+    .stat-card.green .num { color: var(--green); }
+    .stat-card.blue  .num { color: var(--accent); }
+    .stat-card.orange .num { color: var(--orange); }
+    .stat-card.red   .num { color: var(--red); }
+
+    /* ── Site Detail Screen ── */
+    .section-block {
+      background: var(--bg2); border-radius: var(--radius);
+      margin-top: 12px; overflow: hidden;
+    }
+    .section-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .8px;
+      color: var(--hint); padding: 10px 14px 6px;
+      text-transform: uppercase; border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+    .field-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 9px 14px; border-bottom: 1px solid rgba(0,0,0,.04);
+    }
+    .field-row:last-child { border-bottom: none; }
+    .field-label { font-size: 13px; color: var(--hint); }
+    .field-value { font-size: 13px; font-weight: 600; text-align: right; max-width: 55%; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+    }
+    .badge-yes   { background: #e8f5e9; color: #2e7d32; }
+    .badge-no    { background: #fce4ec; color: #c62828; }
+    .badge-blank { background: var(--bg2); color: var(--hint); }
+
+    /* ── Loading & Error ── */
+    .loading {
+      text-align: center; padding: 40px 20px;
+      color: var(--hint); font-size: 14px;
+    }
+    .loading .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid var(--bg2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      background: #fff3f3; border: 1px solid #ffcdd2;
+      border-radius: var(--radius); padding: 12px 14px;
+      color: var(--red); font-size: 13px; margin-top: 12px;
+    }
+    .empty-msg {
+      text-align: center; padding: 32px 20px;
+      color: var(--hint); font-size: 14px;
+    }
+
+    /* ── Bottom nav ── */
+    .tab-bar {
+      display: flex;
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--bg);
+      border-top: 1px solid var(--bg2);
+      padding-bottom: env(safe-area-inset-bottom, 8px);
+      z-index: 20;
+    }
+    .tab-item {
+      flex: 1; text-align: center; padding: 10px 0;
+      cursor: pointer; font-size: 10px; color: var(--hint);
+      transition: color .15s;
+    }
+    .tab-item.active { color: var(--accent); }
+    .tab-icon { font-size: 20px; display: block; margin-bottom: 2px; }
+
+    .page-content { padding-bottom: 68px; }
+
+    /* Recent searches */
+    .recent-label { font-size: 11px; color: var(--hint); margin: 14px 0 6px; }
+    .recent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      background: var(--bg2); border-radius: 20px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer;
+      color: var(--accent); font-weight: 600;
+    }
+    .chip:active { opacity: .7; }
+  </style>
+</head>
+<body>
+
+<!-- ── SEARCH SCREEN ── -->
+<div id="screen-search" class="screen active page-content">
+  <div style="padding: 20px 0 8px;">
+    <div style="font-size: 20px; font-weight: 800; margin-bottom: 4px;">SSV Tracker</div>
+    <div style="font-size: 13px; color: var(--hint);">Search a site to view or update progress</div>
+  </div>
+
+  <div class="search-wrap">
+    <div class="search-input-row">
+      <input id="search-input" class="search-input" type="text"
+        placeholder="Enter Site ID or city…" autocomplete="off" autocorrect="off"/>
+      <button class="btn" onclick="handleSearch()">Search</button>
+    </div>
+    <div id="search-error"></div>
+  </div>
+
+  <div id="recent-wrap" style="display:none;">
+    <div class="recent-label">Recent</div>
+    <div id="recent-chips" class="recent-chips"></div>
+  </div>
+
+  <div id="search-results" class="result-list"></div>
+</div>
+
+<!-- ── SITE DETAIL SCREEN ── -->
+<div id="screen-detail" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('search')">← Back</button>
+    <h1 id="detail-title">Site Detail</h1>
+  </div>
+  <div id="detail-content" style="padding: 0 16px 16px;"></div>
+</div>
+
+<!-- ── DASHBOARD SCREEN ── -->
+<div id="screen-dashboard" class="screen page-content">
+  <div style="padding: 20px 0 8px;">
+    <div style="font-size: 20px; font-weight: 800; margin-bottom: 4px;">Dashboard</div>
+    <div style="font-size: 13px; color: var(--hint);">SSV rollout overview</div>
+  </div>
+  <div id="dashboard-content"></div>
+</div>
+
+<!-- ── TAB BAR ── -->
+<nav class="tab-bar">
+  <div class="tab-item active" id="tab-search" onclick="switchTab('search')">
+    <span class="tab-icon">🔍</span>Search
+  </div>
+  <div class="tab-item" id="tab-dashboard" onclick="switchTab('dashboard')">
+    <span class="tab-icon">📊</span>Dashboard
+  </div>
+</nav>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+var GAS_URL = ''; // TODO: paste deployed GAS Web App URL here
+
+// ── TELEGRAM INIT ────────────────────────────────────────────────────────────
+var tg = window.Telegram && window.Telegram.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
+
+function getInitData() {
+  return tg ? tg.initData : '';
+}
+
+// ── API ──────────────────────────────────────────────────────────────────────
+function apiFetch(action, params) {
+  var url = GAS_URL + '?action=' + action;
+  Object.keys(params || {}).forEach(function(k) {
+    url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]);
+  });
+  return fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.success) throw new Error(data.error || 'API error');
+      return data;
+    });
+}
+
+// ── SCREEN NAVIGATION ────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  document.getElementById('screen-' + id).classList.add('active');
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-item').forEach(function(t) { t.classList.remove('active'); });
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'dashboard') {
+    showScreen('dashboard');
+    loadDashboard();
+  } else {
+    showScreen('search');
+  }
+}
+
+// ── RECENT SITES (localStorage) ──────────────────────────────────────────────
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem('ssv_recent') || '[]'); } catch(e) { return []; }
+}
+function saveRecent(siteId) {
+  var list = getRecent().filter(function(id) { return id !== siteId; });
+  list.unshift(siteId);
+  localStorage.setItem('ssv_recent', JSON.stringify(list.slice(0, 5)));
+  renderRecent();
+}
+function renderRecent() {
+  var list = getRecent();
+  var wrap = document.getElementById('recent-wrap');
+  var chips = document.getElementById('recent-chips');
+  if (!list.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  chips.innerHTML = list.map(function(id) {
+    return '<span class="chip" onclick="loadSite(\'' + escHtml(id) + '\')">' + escHtml(id) + '</span>';
+  }).join('');
+}
+
+// ── SEARCH ───────────────────────────────────────────────────────────────────
+document.getElementById('search-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') handleSearch();
+});
+
+function handleSearch() {
+  var q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  var container = document.getElementById('search-results');
+  var errEl = document.getElementById('search-error');
+  errEl.innerHTML = '';
+  container.innerHTML = loadingHtml('Searching…');
+
+  apiFetch('searchSite', { query: q })
+    .then(function(data) {
+      var results = data.results || [];
+      if (!results.length) {
+        container.innerHTML = '<div class="empty-msg">No sites found for "' + escHtml(q) + '"</div>';
+        return;
+      }
+      container.innerHTML = results.map(function(r) {
+        return '<div class="result-item" onclick="loadSite(\'' + escHtml(r.siteId) + '\')">' +
+          '<div class="site-id">' + escHtml(r.siteId) + '</div>' +
+          '<div class="meta">' + [r.team, r.region, r.city, r.scopeType].filter(Boolean).map(escHtml).join(' · ') + '</div>' +
+        '</div>';
+      }).join('');
+    })
+    .catch(function(err) {
+      container.innerHTML = '';
+      errEl.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+// ── SITE DETAIL ───────────────────────────────────────────────────────────────
+function loadSite(siteId) {
+  saveRecent(siteId);
+  showScreen('detail');
+  document.getElementById('detail-title').textContent = siteId;
+  document.getElementById('detail-content').innerHTML = loadingHtml('Loading site data…');
+
+  apiFetch('getSiteData', { siteId: siteId })
+    .then(function(data) {
+      renderSiteDetail(data.site);
+    })
+    .catch(function(err) {
+      document.getElementById('detail-content').innerHTML =
+        '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+function renderSiteDetail(s) {
+  var html = '';
+
+  // Site info
+  html += section('Site Info', [
+    ['Site ID',    s['Site ID']],
+    ['Team',       s['Team']],
+    ['Region',     s['Region']],
+    ['City',       s['City']],
+    ['Scope Type', s['Scope Type']],
+    ['Batch',      s['Batch']]
+  ]);
+
+  // Execution
+  html += section('Execution', [
+    ['On-Air Plan',    s['On-Air Plan']],
+    ['On-Air Actual',  s['On-Air Actual']],
+    ['Site On-Air',    s['Site On-Air'], 'badge']
+  ]);
+
+  // Testing
+  html += section('Testing', [
+    ['Test Date Planned', s['Test Date Planned']],
+    ['Test Date Actual',  s['Test Date Actual']],
+    ['Test Finished',     s['Test Finished'], 'badge']
+  ]);
+
+  // Analysis
+  html += section('Analysis', [
+    ['Analysis Planned',  s['Analysis Planned']],
+    ['Analysis Actual',   s['Analysis Actual']],
+    ['Analysis Finished', s['Analysis Finished'], 'badge']
+  ]);
+
+  // Change Control
+  html += section('Change Control', [
+    ['Intervention Required', s['Intervention Required'], 'badge'],
+    ['Change Date Planned',   s['Change Date Planned']],
+    ['Change Date Actual',    s['Change Date Actual']],
+    ['Change Completed',      s['Change Completed'], 'badge']
+  ]);
+
+  // Final Acceptance
+  html += section('Final Acceptance', [
+    ['SSV Passed', s['SSV Passed'], 'badge'],
+    ['Remarks',    s['Remarks']]
+  ]);
+
+  // Update button (placeholder — Iteration 2)
+  html += '<button class="btn btn-block" style="margin-top:16px;" disabled>' +
+    '✏️ Update Progress (coming soon)</button>';
+
+  document.getElementById('detail-content').innerHTML = html;
+}
+
+function section(title, fields) {
+  var rows = fields.map(function(f) {
+    var label = f[0], val = f[1] || '', type = f[2];
+    var display = type === 'badge' ? badgeHtml(val) : '<span class="field-value">' + escHtml(val || '—') + '</span>';
+    return '<div class="field-row"><span class="field-label">' + escHtml(label) + '</span>' + display + '</div>';
+  }).join('');
+  return '<div class="section-block"><div class="section-title">' + escHtml(title) + '</div>' + rows + '</div>';
+}
+
+function badgeHtml(val) {
+  var v = String(val || '').toLowerCase();
+  var cls = v === 'yes' ? 'badge-yes' : v === 'no' ? 'badge-no' : 'badge-blank';
+  return '<span class="badge ' + cls + '">' + escHtml(val || '—') + '</span>';
+}
+
+// ── DASHBOARD ────────────────────────────────────────────────────────────────
+var dashLoaded = false;
+function loadDashboard() {
+  if (dashLoaded) return;
+  var el = document.getElementById('dashboard-content');
+  el.innerHTML = loadingHtml('Loading summary…');
+
+  apiFetch('getDashboardSummary', {})
+    .then(function(data) {
+      dashLoaded = true;
+      renderDashboard(data.summary);
+    })
+    .catch(function(err) {
+      el.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+function renderDashboard(s) {
+  var html =
+    '<div class="dash-grid">' +
+      statCard(s.total,               'Total Sites',       'blue')   +
+      statCard(s.onAir,               'On-Air',            'green')  +
+      statCard(s.testDone,            'Tests Done',        'blue')   +
+      statCard(s.ssvPassed,           'SSV Passed',        'green')  +
+      statCard(s.interventionRequired,'Interventions',     'orange') +
+      statCard(s.pending,             'Pending SSV',       'red')    +
+    '</div>';
+  document.getElementById('dashboard-content').innerHTML = html;
+}
+
+function statCard(num, label, color) {
+  return '<div class="stat-card ' + color + '">' +
+    '<div class="num">' + (num || 0) + '</div>' +
+    '<div class="label">' + label + '</div>' +
+  '</div>';
+}
+
+// ── UTILITIES ────────────────────────────────────────────────────────────────
+function loadingHtml(msg) {
+  return '<div class="loading"><div class="spinner"></div>' + escHtml(msg) + '</div>';
+}
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+renderRecent();
+
+// Warn if GAS_URL not set
+if (!GAS_URL) {
+  document.getElementById('search-error').innerHTML =
+    '<div class="error-msg">⚙ GAS_URL not configured in index.html</div>';
+}
+</script>
+</body>
+</html>
