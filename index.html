@@ -164,6 +164,47 @@
       color: var(--hint); font-size: 14px;
     }
 
+    /* ── Form Elements ── */
+    .form-section { margin-top: 12px; }
+    .form-section-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .8px;
+      color: var(--hint); text-transform: uppercase;
+      padding: 10px 0 6px;
+    }
+    .form-group {
+      background: var(--bg2); border-radius: var(--radius);
+      overflow: hidden; margin-bottom: 2px;
+    }
+    .form-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-bottom: 1px solid rgba(0,0,0,.05);
+      gap: 10px;
+    }
+    .form-row:last-child { border-bottom: none; }
+    .form-row label { font-size: 13px; color: var(--text); flex-shrink: 0; max-width: 48%; }
+    .form-row label.disabled { color: var(--hint); }
+    .form-select, .form-input {
+      flex: 1; background: var(--bg); border: 1.5px solid transparent;
+      border-radius: 6px; padding: 7px 10px; font-size: 13px;
+      color: var(--text); outline: none; text-align: right;
+      transition: border-color .2s;
+    }
+    .form-select:focus, .form-input:focus { border-color: var(--accent); }
+    .form-select:disabled, .form-input:disabled {
+      opacity: .4; cursor: not-allowed; background: var(--bg2);
+    }
+
+    /* ── Diff view ── */
+    .diff-row {
+      background: var(--bg2); border-radius: var(--radius);
+      padding: 10px 14px; margin-bottom: 8px;
+    }
+    .diff-field { font-size: 11px; color: var(--hint); margin-bottom: 4px; }
+    .diff-values { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .diff-old { color: var(--red); text-decoration: line-through; }
+    .diff-arrow { color: var(--hint); }
+    .diff-new { color: var(--green); font-weight: 700; }
+
     /* ── Bottom nav ── */
     .tab-bar {
       display: flex;
@@ -236,6 +277,34 @@
     <div style="font-size: 13px; color: var(--hint);">SSV rollout overview</div>
   </div>
   <div id="dashboard-content"></div>
+</div>
+
+<!-- ── UPDATE FORM SCREEN ── -->
+<div id="screen-form" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('detail')">← Back</button>
+    <h1 id="form-title">Update Site</h1>
+  </div>
+  <div id="form-content" style="padding: 0 16px 16px;"></div>
+</div>
+
+<!-- ── CONFIRM SCREEN ── -->
+<div id="screen-confirm" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('form')">← Edit</button>
+    <h1>Confirm Update</h1>
+  </div>
+  <div style="padding: 0 16px 16px;">
+    <div style="font-size: 13px; color: var(--hint); margin: 12px 0 6px;">Changes to be saved:</div>
+    <div id="confirm-diff"></div>
+    <button class="btn btn-block" id="confirm-submit-btn" onclick="submitUpdate()" style="margin-top:20px;">
+      ✅ Confirm &amp; Save
+    </button>
+    <button class="btn btn-outline btn-block" onclick="showScreen('form')" style="margin-top:8px;">
+      ← Go Back &amp; Edit
+    </button>
+    <div id="confirm-error"></div>
+  </div>
 </div>
 
 <!-- ── TAB BAR ── -->
@@ -357,6 +426,8 @@ function loadSite(siteId) {
 
   apiFetch('getSiteData', { siteId: siteId })
     .then(function(data) {
+      currentSiteId   = siteId;
+      currentSiteData = data.site;
       renderSiteDetail(data.site);
     })
     .catch(function(err) {
@@ -413,9 +484,8 @@ function renderSiteDetail(s) {
     ['Remarks',    s['Remarks']]
   ]);
 
-  // Update button (placeholder — Iteration 2)
-  html += '<button class="btn btn-block" style="margin-top:16px;" disabled>' +
-    '✏️ Update Progress (coming soon)</button>';
+  html += '<button class="btn btn-block" style="margin-top:16px;" onclick="openUpdateForm()">' +
+    '✏️ Update Progress</button>';
 
   document.getElementById('detail-content').innerHTML = html;
 }
@@ -478,6 +548,230 @@ function loadingHtml(msg) {
 }
 function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── UPDATE FORM ──────────────────────────────────────────────────────────────
+
+var currentSiteId   = null; // Site ID being edited
+var currentSiteData = null; // Full site row (read-only snapshot)
+var pendingFields   = {};   // Staged changes { fieldName: newValue }
+
+var FORM_SECTIONS = [
+  {
+    title: 'Section A — Execution',
+    fields: [
+      { key: 'On-Air Actual',  label: 'On-Air Actual',  type: 'date' },
+      { key: 'Site On-Air',    label: 'Site On-Air',     type: 'yesno' }
+    ]
+  },
+  {
+    title: 'Section B — Testing',
+    id: 'section-testing',
+    fields: [
+      { key: 'Test Date Actual', label: 'Test Date Actual', type: 'date' },
+      { key: 'Test Finished',    label: 'Test Finished',    type: 'yesno' }
+    ]
+  },
+  {
+    title: 'Section C — Analysis',
+    id: 'section-analysis',
+    fields: [
+      { key: 'Analysis Actual',   label: 'Analysis Actual',   type: 'date' },
+      { key: 'Analysis Finished', label: 'Analysis Finished', type: 'yesno' }
+    ]
+  },
+  {
+    title: 'Section D — Change Control',
+    id: 'section-change',
+    fields: [
+      { key: 'Intervention Required', label: 'Intervention Required', type: 'yesno' },
+      { key: 'Change Date Actual',    label: 'Change Date Actual',    type: 'date', id: 'change-date-row' },
+      { key: 'Change Completed',      label: 'Change Completed',      type: 'yesno', id: 'change-completed-row' }
+    ]
+  },
+  {
+    title: 'Section E — Final Acceptance',
+    fields: [
+      { key: 'SSV Passed', label: 'SSV Passed', type: 'yesno' },
+      { key: 'Remarks',    label: 'Remarks',    type: 'text' }
+    ]
+  }
+];
+
+function openUpdateForm() {
+  if (!currentSiteId || !currentSiteData) return;
+  pendingFields = {};
+  document.getElementById('form-title').textContent = 'Update ' + currentSiteId;
+  renderForm();
+  showScreen('form');
+}
+
+function renderForm() {
+  var s = currentSiteData;
+  var html = '';
+
+  FORM_SECTIONS.forEach(function(section) {
+    html += '<div class="form-section"' + (section.id ? ' id="' + section.id + '"' : '') + '>';
+    html += '<div class="form-section-title">' + escHtml(section.title) + '</div>';
+    html += '<div class="form-group">';
+    section.fields.forEach(function(f) {
+      html += renderFormField(f, s[f.key] || '');
+    });
+    html += '</div></div>';
+  });
+
+  html += '<button class="btn btn-block" style="margin-top:20px;" onclick="goToConfirm()">Review Changes →</button>';
+  document.getElementById('form-content').innerHTML = html;
+
+  applySmartLogic();
+}
+
+function renderFormField(f, currentVal) {
+  var rowId  = f.id ? ' id="' + f.id + '"' : '';
+  var inputId = 'field-' + f.key.replace(/\s+/g, '-');
+  var input   = '';
+
+  if (f.type === 'yesno') {
+    input = '<select class="form-select" id="' + inputId + '" onchange="onFieldChange(\'' + f.key + '\',this.value)">' +
+      '<option value="">—</option>' +
+      '<option value="Yes"' + (currentVal === 'Yes' ? ' selected' : '') + '>Yes</option>' +
+      '<option value="No"'  + (currentVal === 'No'  ? ' selected' : '') + '>No</option>' +
+      '</select>';
+  } else if (f.type === 'date') {
+    input = '<input class="form-input" id="' + inputId + '" type="text" placeholder="DD-MMM-YY"' +
+      ' value="' + escHtml(currentVal) + '"' +
+      ' onchange="onFieldChange(\'' + f.key + '\',this.value)"' +
+      ' oninput="onFieldChange(\'' + f.key + '\',this.value)"/>';
+  } else {
+    input = '<input class="form-input" id="' + inputId + '" type="text" placeholder="Optional…"' +
+      ' value="' + escHtml(currentVal) + '"' +
+      ' onchange="onFieldChange(\'' + f.key + '\',this.value)"' +
+      ' oninput="onFieldChange(\'' + f.key + '\',this.value)"/>';
+  }
+
+  return '<div class="form-row"' + rowId + '><label>' + escHtml(f.label) + '</label>' + input + '</div>';
+}
+
+function onFieldChange(key, value) {
+  pendingFields[key] = value.trim();
+}
+
+// Smart logic: conditional field visibility
+function applySmartLogic() {
+  var siteOnAir   = document.getElementById('field-Site-On-Air');
+  var testSection = document.getElementById('section-testing');
+  var anaSection  = document.getElementById('section-analysis');
+  var intervention = document.getElementById('field-Intervention-Required');
+  var changeDateRow = document.getElementById('change-date-row');
+  var changeCompRow = document.getElementById('change-completed-row');
+
+  function update() {
+    var onAirVal = siteOnAir ? siteOnAir.value : '';
+    var interVal = intervention ? intervention.value : '';
+
+    if (testSection) testSection.style.opacity = (onAirVal === 'No') ? '.4' : '1';
+    if (anaSection)  anaSection.style.opacity  = (onAirVal === 'No') ? '.4' : '1';
+
+    var showChange = interVal === 'Yes';
+    if (changeDateRow) changeDateRow.style.display = showChange ? '' : 'none';
+    if (changeCompRow) changeCompRow.style.display = showChange ? '' : 'none';
+  }
+
+  if (siteOnAir)    siteOnAir.addEventListener('change', update);
+  if (intervention) intervention.addEventListener('change', update);
+  update();
+}
+
+// ── CONFIRM SCREEN ────────────────────────────────────────────────────────────
+
+function goToConfirm() {
+  // Filter to only actually-changed values
+  var changed = {};
+  Object.keys(pendingFields).forEach(function(key) {
+    var newVal = pendingFields[key];
+    var oldVal = String(currentSiteData[key] || '').trim();
+    if (newVal !== oldVal && newVal !== '') changed[key] = newVal;
+  });
+
+  if (!Object.keys(changed).length) {
+    alert('No changes made yet.');
+    return;
+  }
+
+  pendingFields = changed; // keep only real changes
+
+  var html = Object.keys(changed).map(function(key) {
+    var oldVal = String(currentSiteData[key] || '—');
+    var newVal = changed[key] || '—';
+    return '<div class="diff-row">' +
+      '<div class="diff-field">' + escHtml(key) + '</div>' +
+      '<div class="diff-values">' +
+        '<span class="diff-old">'   + escHtml(oldVal) + '</span>' +
+        '<span class="diff-arrow">→</span>' +
+        '<span class="diff-new">'   + escHtml(newVal) + '</span>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('confirm-diff').innerHTML = html;
+  document.getElementById('confirm-error').innerHTML = '';
+  document.getElementById('confirm-submit-btn').disabled = false;
+  showScreen('confirm');
+}
+
+// ── SUBMIT ────────────────────────────────────────────────────────────────────
+
+function submitUpdate() {
+  var btn = document.getElementById('confirm-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  var payload = {
+    action:   'updateSiteData',
+    siteId:   currentSiteId,
+    fields:   pendingFields,
+    initData: getInitData()
+  };
+
+  fetch(GAS_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify(payload)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (!data.success) throw new Error(data.error || 'Update failed');
+
+    // Haptic feedback
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
+    // Refresh cached site data with new values
+    Object.keys(pendingFields).forEach(function(k) {
+      currentSiteData[k] = pendingFields[k];
+    });
+    pendingFields = {};
+
+    showSuccessBanner(data.result.message);
+    showScreen('detail');
+    renderSiteDetail(currentSiteData);
+  })
+  .catch(function(err) {
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+    btn.disabled = false;
+    btn.textContent = '✅ Confirm & Save';
+    document.getElementById('confirm-error').innerHTML =
+      '<div class="error-msg" style="margin-top:12px;">⚠ ' + escHtml(err.message) + '</div>';
+  });
+}
+
+function showSuccessBanner(msg) {
+  var banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:16px;left:16px;right:16px;background:#e8f5e9;' +
+    'border:1px solid #a5d6a7;border-radius:10px;padding:12px 16px;font-size:13px;' +
+    'color:#2e7d32;font-weight:600;z-index:99;text-align:center;';
+  banner.textContent = '✅ ' + msg;
+  document.body.appendChild(banner);
+  setTimeout(function() { banner.remove(); }, 3000);
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
