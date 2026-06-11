@@ -451,31 +451,31 @@ function renderSiteDetail(s) {
 
   // Execution
   html += section('Execution', [
-    ['On-Air Plan',    s['On-Air Plan']],
-    ['On-Air Actual',  s['On-Air Actual']],
-    ['Site On-Air',    s['Site On-Air'], 'badge']
+    ['On-Air Plan',   fmtDate(s['On-Air Plan'])],
+    ['On-Air Actual', fmtDate(s['On-Air Actual'])],
+    ['Site On-Air',   s['Site On-Air'], 'badge']
   ]);
 
   // Testing
   html += section('Testing', [
-    ['Test Date Planned', s['Test Date Planned']],
-    ['Test Date Actual',  s['Test Date Actual']],
+    ['Test Date Planned', fmtDate(s['Test Date Planned'])],
+    ['Test Date Actual',  fmtDate(s['Test Date Actual'])],
     ['Test Finished',     s['Test Finished'], 'badge']
   ]);
 
   // Analysis
   html += section('Analysis', [
-    ['Analysis Planned',  s['Analysis Planned']],
-    ['Analysis Actual',   s['Analysis Actual']],
+    ['Analysis Planned',  fmtDate(s['Analysis Planned'])],
+    ['Analysis Actual',   fmtDate(s['Analysis Actual'])],
     ['Analysis Finished', s['Analysis Finished'], 'badge']
   ]);
 
   // Change Control
   html += section('Change Control', [
-    ['Intervention Required', s['Intervention Required'], 'badge'],
-    ['Change Date Planned',   s['Change Date Planned']],
-    ['Change Date Actual',    s['Change Date Actual']],
-    ['Change Completed',      s['Change Completed'], 'badge']
+    ['Intervention Req.',   s['Intervention Req.'], 'badge'],
+    ['Change Date Planned', fmtDate(s['Change Date Planned'])],
+    ['Change Date Actual',  fmtDate(s['Change Date Actual'])],
+    ['Change Completed',    s['Change Completed'], 'badge']
   ]);
 
   // Final Acceptance
@@ -550,6 +550,18 @@ function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Format ISO date strings to DD-MMM-YY; pass through anything else
+function fmtDate(val) {
+  if (!val) return '—';
+  var d = new Date(val);
+  if (isNaN(d.getTime())) return val;
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var dd = String(d.getDate()).padStart(2,'0');
+  var mm = months[d.getMonth()];
+  var yy = String(d.getFullYear()).slice(-2);
+  return dd + '-' + mm + '-' + yy;
+}
+
 // ── UPDATE FORM ──────────────────────────────────────────────────────────────
 
 var currentSiteId   = null; // Site ID being edited
@@ -584,7 +596,7 @@ var FORM_SECTIONS = [
     title: 'Section D — Change Control',
     id: 'section-change',
     fields: [
-      { key: 'Intervention Required', label: 'Intervention Required', type: 'yesno' },
+      { key: 'Intervention Req.',     label: 'Intervention Req.',     type: 'yesno' },
       { key: 'Change Date Actual',    label: 'Change Date Actual',    type: 'date', id: 'change-date-row' },
       { key: 'Change Completed',      label: 'Change Completed',      type: 'yesno', id: 'change-completed-row' }
     ]
@@ -661,7 +673,7 @@ function applySmartLogic() {
   var siteOnAir   = document.getElementById('field-Site-On-Air');
   var testSection = document.getElementById('section-testing');
   var anaSection  = document.getElementById('section-analysis');
-  var intervention = document.getElementById('field-Intervention-Required');
+  var intervention = document.getElementById('field-Intervention-Req.');
   var changeDateRow = document.getElementById('change-date-row');
   var changeCompRow = document.getElementById('change-completed-row');
 
