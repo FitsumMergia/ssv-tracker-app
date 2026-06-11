@@ -343,6 +343,44 @@
   </div>
 </div>
 
+<!-- ── ESCALATION SCREEN ── -->
+<div id="screen-escalation" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('detail')">← Back</button>
+    <h1>Flag as Blocked</h1>
+  </div>
+  <div style="padding: 0 16px 16px;">
+    <div style="background:#fff3f3;border:1px solid #ffcdd2;border-radius:var(--radius);padding:12px 14px;margin-top:12px;font-size:13px;color:var(--red);">
+      ⚠️ This will notify the supervisor immediately.
+    </div>
+    <div class="section-block" style="margin-top:14px;">
+      <div class="section-title">Flag Details</div>
+      <div class="form-row">
+        <label>Flag Type</label>
+        <select id="esc-type" class="form-select">
+          <option value="Blocked">Blocked</option>
+          <option value="Access Issue">Access Issue</option>
+          <option value="Equipment Missing">Equipment Missing</option>
+          <option value="Permit Issue">Permit Issue</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="section-block" style="margin-top:8px;">
+      <div class="section-title">Reason</div>
+      <div style="padding:10px 14px;">
+        <textarea id="esc-reason" rows="4"
+          style="width:100%;border:1.5px solid var(--bg2);border-radius:6px;padding:10px;font-size:13px;color:var(--text);background:var(--bg2);resize:none;outline:none;font-family:inherit;"
+          placeholder="Describe what is blocking this site…"></textarea>
+      </div>
+    </div>
+    <button class="btn btn-block" id="esc-submit-btn"
+      style="margin-top:16px;background:var(--red);"
+      onclick="submitEscalation()">🚨 Send Alert to Supervisor</button>
+    <div id="esc-error"></div>
+  </div>
+</div>
+
 <!-- ── TAB BAR ── -->
 <nav class="tab-bar">
   <div class="tab-item active" id="tab-search" onclick="switchTab('search')">
@@ -532,8 +570,8 @@ function renderSiteDetail(s) {
     ['Remarks',    s['Remarks']]
   ]);
 
-  html += '<button class="btn btn-block" style="margin-top:16px;" onclick="openUpdateForm()">' +
-    '✏️ Update Progress</button>';
+  html += '<button class="btn btn-block" style="margin-top:16px;" onclick="openUpdateForm()">✏️ Update Progress</button>';
+  html += '<button class="btn btn-outline btn-block" style="margin-top:8px;border-color:var(--red);color:var(--red);" onclick="openEscalation()">🚨 Flag as Blocked</button>';
 
   document.getElementById('detail-content').innerHTML = html;
 }
@@ -880,7 +918,7 @@ function submitUpdate() {
 
   fetch(GAS_URL, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'text/plain' },
     body:    JSON.stringify(payload)
   })
   .then(function(r) { return r.json(); })
@@ -919,6 +957,61 @@ function showSuccessBanner(msg) {
   banner.textContent = '✅ ' + msg;
   document.body.appendChild(banner);
   setTimeout(function() { banner.remove(); }, 3000);
+}
+
+// ── ESCALATION ───────────────────────────────────────────────────────────────
+
+function openEscalation() {
+  document.getElementById('esc-type').value = 'Blocked';
+  document.getElementById('esc-reason').value = '';
+  document.getElementById('esc-error').innerHTML = '';
+  document.getElementById('esc-submit-btn').disabled = false;
+  document.getElementById('esc-submit-btn').textContent = '🚨 Send Alert to Supervisor';
+  showScreen('escalation');
+}
+
+function submitEscalation() {
+  var flagType = document.getElementById('esc-type').value;
+  var reason   = document.getElementById('esc-reason').value.trim();
+  var btn      = document.getElementById('esc-submit-btn');
+
+  if (!reason) {
+    document.getElementById('esc-error').innerHTML =
+      '<div class="error-msg" style="margin-top:10px;">⚠ Please describe what is blocking the site.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  if (tg && tg.MainButton) tg.MainButton.hide();
+
+  var payload = {
+    action:   'flagEscalation',
+    siteId:   currentSiteId,
+    flagType: flagType,
+    reason:   reason,
+    initData: getInitData()
+  };
+
+  fetch(GAS_URL, {
+    method:  'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body:    JSON.stringify(payload)
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (!data.success) throw new Error(data.error || 'Escalation failed');
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('warning');
+    showSuccessBanner('🚨 Supervisor notified for site ' + currentSiteId);
+    showScreen('detail');
+  })
+  .catch(function(err) {
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+    btn.disabled = false;
+    btn.textContent = '🚨 Send Alert to Supervisor';
+    document.getElementById('esc-error').innerHTML =
+      '<div class="error-msg" style="margin-top:10px;">⚠ ' + escHtml(err.message) + '</div>';
+  });
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
