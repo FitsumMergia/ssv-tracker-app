@@ -260,6 +260,52 @@
 
     .page-content { padding-bottom: 68px; }
 
+    /* ── Audit log entries ── */
+    .audit-entry {
+      background: var(--bg2); border-radius: var(--radius);
+      padding: 10px 14px; margin-bottom: 8px;
+    }
+    .audit-meta { font-size: 11px; color: var(--hint); margin-bottom: 5px; display: flex; justify-content: space-between; }
+    .audit-field { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .audit-change { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .audit-old { color: var(--red); text-decoration: line-through; }
+    .audit-new { color: var(--green); font-weight: 700; }
+
+    /* ── Quick action buttons ── */
+    .quick-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+    .quick-btn {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--bg2); border: none; border-radius: var(--radius);
+      padding: 13px 16px; font-size: 14px; font-weight: 600;
+      color: var(--text); cursor: pointer; text-align: left; width: 100%;
+      transition: opacity .15s;
+    }
+    .quick-btn:active { opacity: .7; }
+    .quick-btn .q-icon { font-size: 18px; flex-shrink: 0; }
+    .quick-btn .q-label { flex: 1; }
+    .quick-btn .q-arrow { color: var(--hint); font-size: 16px; }
+    .quick-btn.primary { background: var(--accent); color: #fff; }
+    .quick-btn.primary .q-arrow { color: rgba(255,255,255,.6); }
+
+    /* ── Team breakdown table ── */
+    .team-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+    .team-table th { text-align: left; color: var(--hint); font-weight: 700; padding: 5px 8px; border-bottom: 1px solid var(--bg2); font-size: 10px; text-transform: uppercase; }
+    .team-table td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,.04); }
+    .team-table tr:last-child td { border-bottom: none; }
+    .team-pct { font-weight: 700; color: var(--accent); }
+    .mini-bar-track { height: 4px; background: var(--bg2); border-radius: 4px; margin-top: 3px; min-width: 40px; }
+    .mini-bar-fill  { height: 100%; border-radius: 4px; background: var(--accent); }
+
+    /* ── Sort bar ── */
+    .sort-bar { display: flex; gap: 6px; align-items: center; margin: 8px 0 4px; }
+    .sort-label { font-size: 11px; color: var(--hint); }
+    .sort-chip {
+      background: var(--bg2); border-radius: 20px;
+      padding: 4px 10px; font-size: 11px; cursor: pointer;
+      color: var(--hint); font-weight: 600; border: 1.5px solid transparent;
+    }
+    .sort-chip.active { color: var(--accent); border-color: var(--accent); }
+
     /* Clickable stat cards */
     .stat-card.clickable { cursor: pointer; }
     .stat-card.clickable:active { opacity: .72; transform: scale(.97); transition: transform .1s; }
@@ -396,6 +442,15 @@
   </div>
 </div>
 
+<!-- ── AUDIT LOG SCREEN ── -->
+<div id="screen-audit" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('detail')">← Back</button>
+    <h1 id="audit-title">History</h1>
+  </div>
+  <div id="audit-content" style="padding: 0 16px 16px;"></div>
+</div>
+
 <!-- ── DRILLDOWN SCREEN ── -->
 <div id="screen-drill" class="screen page-content">
   <div class="header">
@@ -499,6 +554,7 @@ document.getElementById('search-input').addEventListener('keydown', function(e) 
 
 var lastSearchResults = [];
 var activeSearchFilter = null;
+var activeSort = 'siteId'; // 'siteId' | 'team' | 'region'
 
 function handleSearch() {
   var q = document.getElementById('search-input').value.trim();
@@ -528,7 +584,7 @@ function renderSearchResults() {
   var container = document.getElementById('search-results');
   var results = lastSearchResults;
 
-  // Build unique team chips
+  // Team filter chips
   var teams = [];
   results.forEach(function(r) {
     if (r.team && teams.indexOf(r.team) === -1) teams.push(r.team);
@@ -548,9 +604,26 @@ function renderSearchResults() {
     html += '</div>';
   }
 
+  // Sort bar
+  html += '<div class="sort-bar">' +
+    '<span class="sort-label">Sort:</span>' +
+    ['siteId','team','region'].map(function(s) {
+      var labels = { siteId:'Site ID', team:'Team', region:'Region' };
+      return '<span class="sort-chip' + (activeSort === s ? ' active' : '') +
+        '" onclick="setSort(\'' + s + '\')">' + labels[s] + '</span>';
+    }).join('') +
+  '</div>';
+
+  // Filter + sort
   var filtered = activeSearchFilter
     ? results.filter(function(r) { return r.team === activeSearchFilter; })
-    : results;
+    : results.slice();
+
+  filtered.sort(function(a, b) {
+    var ka = String(a[activeSort] || a.siteId).toLowerCase();
+    var kb = String(b[activeSort] || b.siteId).toLowerCase();
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
 
   html += filtered.map(function(r) {
     return '<div class="result-item" onclick="loadSite(\'' + escHtml(r.siteId) + '\')">' +
@@ -565,6 +638,126 @@ function renderSearchResults() {
 function setSearchFilter(team) {
   activeSearchFilter = team;
   renderSearchResults();
+}
+
+function setSort(s) {
+  activeSort = s;
+  renderSearchResults();
+}
+
+// ── QUICK ACTIONS ────────────────────────────────────────────────────────────
+
+function renderQuickActions(s) {
+  var actions = [];
+
+  var onAir      = String(s['Site On-Air']        || '').toLowerCase();
+  var testDone   = String(s['Test Finished']       || '').toLowerCase();
+  var anaDone    = String(s['Analysis Finished']   || '').toLowerCase();
+  var interv     = String(s['Intervention Req.']   || '').toLowerCase();
+  var changeDone = String(s['Change Completed']    || '').toLowerCase();
+  var ssvPassed  = String(s['SSV Passed']          || '').toLowerCase();
+
+  if (onAir !== 'yes') {
+    actions.push({ icon: '📡', label: 'Mark Site On-Air',      field: 'Site On-Air',       value: 'Yes', primary: true });
+  } else if (testDone !== 'yes') {
+    actions.push({ icon: '🧪', label: 'Mark Test Done',         field: 'Test Finished',     value: 'Yes', primary: true });
+  } else if (anaDone !== 'yes') {
+    actions.push({ icon: '📊', label: 'Mark Analysis Done',     field: 'Analysis Finished', value: 'Yes', primary: true });
+  } else if (interv === 'yes' && changeDone !== 'yes') {
+    actions.push({ icon: '🔧', label: 'Mark Change Completed',  field: 'Change Completed',  value: 'Yes', primary: true });
+  } else if (ssvPassed !== 'yes') {
+    actions.push({ icon: '✅', label: 'Mark SSV Passed',        field: 'SSV Passed',        value: 'Yes', primary: true });
+  }
+
+  if (!actions.length) {
+    return '<div style="margin-top:14px;padding:12px 14px;background:#e8f5e9;border-radius:var(--radius);font-size:13px;color:#2e7d32;font-weight:600;">✅ SSV Complete</div>';
+  }
+
+  var html = '<div class="quick-actions">';
+  actions.forEach(function(a) {
+    html += '<button class="quick-btn' + (a.primary ? ' primary' : '') + '" onclick="submitQuickUpdate(\'' +
+      escHtml(a.field) + '\',\'' + escHtml(a.value) + '\',\'' + escHtml(a.label) + '\')">' +
+      '<span class="q-icon">' + a.icon + '</span>' +
+      '<span class="q-label">' + escHtml(a.label) + '</span>' +
+      '<span class="q-arrow">›</span>' +
+    '</button>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function submitQuickUpdate(field, value, label) {
+  if (!currentSiteId) return;
+  var fields = {};
+  fields[field] = value;
+
+  var url = GAS_URL +
+    '?action=updateSiteData' +
+    '&key='    + encodeURIComponent(API_KEY) +
+    '&siteId=' + encodeURIComponent(currentSiteId) +
+    '&fields=' + encodeURIComponent(JSON.stringify(fields)) +
+    '&userId=' + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
+                   ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
+                   : 'webapp_user');
+
+  // Optimistic UI — show loading immediately
+  document.getElementById('detail-content').innerHTML = loadingHtml('Saving…');
+
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.success) throw new Error(data.error || 'Update failed');
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      currentSiteData[field] = value;
+      showSuccessBanner('✅ ' + label);
+      renderSiteDetail(currentSiteData);
+    })
+    .catch(function(err) {
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+      renderSiteDetail(currentSiteData);
+      document.getElementById('confirm-error');
+      showSuccessBanner('⚠ ' + err.message);
+    });
+}
+
+// ── AUDIT LOG ────────────────────────────────────────────────────────────────
+
+function openAuditLog() {
+  if (!currentSiteId) return;
+  document.getElementById('audit-title').textContent = currentSiteId + ' · History';
+  document.getElementById('audit-content').innerHTML = loadingHtml('Loading history…');
+  showScreen('audit');
+
+  apiFetch('getAuditLog', { siteId: currentSiteId })
+    .then(function(data) {
+      var entries = data.entries || [];
+      if (!entries.length) {
+        document.getElementById('audit-content').innerHTML =
+          '<div class="empty-msg">No changes recorded yet</div>';
+        return;
+      }
+      var html = '<div style="font-size:12px;color:var(--hint);margin:10px 0 8px;">' +
+        entries.length + ' change' + (entries.length !== 1 ? 's' : '') + '</div>';
+      html += entries.map(function(e) {
+        var d = new Date(e.ts);
+        var dateStr = isNaN(d) ? e.ts : fmtDate(d.toISOString()) + ' ' +
+          d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return '<div class="audit-entry">' +
+          '<div class="audit-meta"><span>' + escHtml(e.user) + '</span><span>' + escHtml(dateStr) + '</span></div>' +
+          '<div class="audit-field">' + escHtml(e.field) + '</div>' +
+          '<div class="audit-change">' +
+            '<span class="audit-old">' + escHtml(e.oldVal || '—') + '</span>' +
+            '<span style="color:var(--hint)">→</span>' +
+            '<span class="audit-new">' + escHtml(e.newVal || '—') + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      document.getElementById('audit-content').innerHTML = html;
+    })
+    .catch(function(err) {
+      document.getElementById('audit-content').innerHTML =
+        '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
 }
 
 // ── DRILLDOWN ────────────────────────────────────────────────────────────────
@@ -715,8 +908,12 @@ function renderSiteDetail(s) {
     ['Remarks',    s['Remarks']]
   ]);
 
-  html += '<button class="btn btn-block" style="margin-top:16px;" onclick="openUpdateForm()">✏️ Update Progress</button>';
-  html += '<button class="btn btn-outline btn-block" style="margin-top:8px;border-color:var(--red);color:var(--red);" onclick="openEscalation()">🚨 Flag as Blocked</button>';
+  html += renderQuickActions(s);
+  html += '<button class="btn btn-block" style="margin-top:12px;" onclick="openUpdateForm()">✏️ Full Update Form</button>';
+  html += '<div style="display:flex;gap:8px;margin-top:8px;">' +
+    '<button class="btn btn-outline" style="flex:1;" onclick="openAuditLog()">📋 History</button>' +
+    '<button class="btn btn-outline" style="flex:1;border-color:var(--red);color:var(--red);" onclick="openEscalation()">🚨 Flag Blocked</button>' +
+  '</div>';
 
   document.getElementById('detail-content').innerHTML = html;
 }
@@ -743,17 +940,20 @@ function loadDashboard() {
   var el = document.getElementById('dashboard-content');
   el.innerHTML = skeletonDashHtml();
 
-  apiFetch('getDashboardSummary', {})
-    .then(function(data) {
-      dashLoaded = true;
-      renderDashboard(data.summary);
-    })
-    .catch(function(err) {
-      el.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
-    });
+  Promise.all([
+    apiFetch('getDashboardSummary', {}),
+    apiFetch('getTeamBreakdown', {})
+  ])
+  .then(function(results) {
+    dashLoaded = true;
+    renderDashboard(results[0].summary, results[1].teams);
+  })
+  .catch(function(err) {
+    el.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+  });
 }
 
-function renderDashboard(s) {
+function renderDashboard(s, teams) {
   var html =
     '<div class="dash-grid">' +
       statCard(s.total,                'Total Sites',   'blue',   'openDrilldown("total","","All Sites")')               +
@@ -762,12 +962,38 @@ function renderDashboard(s) {
       statCard(s.ssvPassed,            'SSV Passed',    'green',  'openDrilldown("SSV Passed","Yes","SSV Passed")')      +
       statCard(s.interventionRequired, 'Interventions', 'orange', 'openDrilldown("Intervention Req.","Yes","Interventions Required")') +
       statCard(s.pending,              'Pending SSV',   'red',    'openDrilldown("SSV Passed","pending","Pending SSV")') +
-    '</div>' +
-    '<div style="margin-top:20px;padding:14px;background:var(--bg2);border-radius:var(--radius);">' +
-      '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:10px;">Escalation Alerts</div>' +
-      '<button class="btn btn-outline" style="width:100%;font-size:13px;" onclick="openSupervisorSetup()">⚙ Set Me as Supervisor</button>' +
-      '<div id="supervisor-status" style="font-size:12px;color:var(--hint);margin-top:8px;text-align:center;"></div>' +
     '</div>';
+
+  // Team breakdown
+  if (teams && teams.length) {
+    html += '<div style="margin-top:16px;">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:6px;">Team Progress</div>' +
+      '<div style="background:var(--bg2);border-radius:var(--radius);overflow:hidden;padding:4px 0;">' +
+      '<table class="team-table"><thead><tr>' +
+        '<th>Team</th><th>Total</th><th>On-Air</th><th>SSV ✓</th><th>%</th>' +
+      '</tr></thead><tbody>';
+    teams.forEach(function(t) {
+      var pct = t.total > 0 ? Math.round((t.ssvPassed / t.total) * 100) : 0;
+      html += '<tr>' +
+        '<td style="font-weight:600;">' + escHtml(t.name) + '</td>' +
+        '<td style="text-align:center;">' + t.total + '</td>' +
+        '<td style="text-align:center;">' + t.onAir + '</td>' +
+        '<td style="text-align:center;color:var(--green);font-weight:700;">' + t.ssvPassed + '</td>' +
+        '<td><span class="team-pct">' + pct + '%</span>' +
+          '<div class="mini-bar-track"><div class="mini-bar-fill" style="width:' + pct + '%"></div></div>' +
+        '</td>' +
+      '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  }
+
+  // Supervisor setup
+  html += '<div style="margin-top:14px;padding:14px;background:var(--bg2);border-radius:var(--radius);">' +
+    '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:10px;">Escalation Alerts</div>' +
+    '<button class="btn btn-outline" style="width:100%;font-size:13px;" onclick="openSupervisorSetup()">⚙ Set Me as Supervisor</button>' +
+    '<div id="supervisor-status" style="font-size:12px;color:var(--hint);margin-top:8px;text-align:center;"></div>' +
+  '</div>';
+
   document.getElementById('dashboard-content').innerHTML = html;
 }
 
