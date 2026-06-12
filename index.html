@@ -364,6 +364,7 @@
     <h1 id="detail-title">Site Detail</h1>
     <button class="back-btn" style="color:var(--accent);font-size:18px;" onclick="refreshDetail()" title="Refresh">↻</button>
   </div>
+  <div id="cache-indicator" style="display:none;padding:3px 16px 0;font-size:11px;color:var(--hint);"></div>
   <div id="detail-content" style="padding: 0 16px 16px;"></div>
 </div>
 
@@ -462,8 +463,9 @@
 
 <!-- ── TAB BAR ── -->
 <nav class="tab-bar">
-  <div class="tab-item active" id="tab-search" onclick="switchTab('search')">
+  <div class="tab-item active" id="tab-search" onclick="switchTab('search')" style="position:relative;">
     <span class="tab-icon">🔍</span>Search
+    <span id="queue-badge" style="display:none;position:absolute;top:6px;right:18px;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 5px;min-width:16px;text-align:center;"></span>
   </div>
   <div class="tab-item" id="tab-dashboard" onclick="switchTab('dashboard')">
     <span class="tab-icon">📊</span>Dashboard
@@ -526,6 +528,136 @@ function switchTab(tab) {
   }
 }
 
+// ── CACHE ────────────────────────────────────────────────────────────────────
+var CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached(key) {
+  try {
+    var item = JSON.parse(localStorage.getItem('ssv_c_' + key));
+    if (!item || Date.now() - item.ts > CACHE_TTL) return null;
+    return item.data;
+  } catch(e) { return null; }
+}
+
+function setCache(key, data) {
+  try { localStorage.setItem('ssv_c_' + key, JSON.stringify({ ts: Date.now(), data: data })); } catch(e) {}
+}
+
+function getCacheAge(key) {
+  try {
+    var item = JSON.parse(localStorage.getItem('ssv_c_' + key));
+    if (!item) return null;
+    return Math.round((Date.now() - item.ts) / 60000);
+  } catch(e) { return null; }
+}
+
+function bustCache(key) {
+  try { localStorage.removeItem('ssv_c_' + key); } catch(e) {}
+}
+
+function showCacheIndicator(ageMin) {
+  var el = document.getElementById('cache-indicator');
+  if (!el) return;
+  if (ageMin === null || ageMin === 0) {
+    el.style.display = 'none';
+  } else {
+    el.style.display = 'block';
+    el.innerHTML = '🕐 Cached · ' + ageMin + ' min ago — <span style="color:var(--accent);cursor:pointer;" onclick="refreshDetail()">Refresh</span>';
+  }
+}
+
+function hideCacheIndicator() {
+  var el = document.getElementById('cache-indicator');
+  if (el) el.style.display = 'none';
+}
+
+// ── OFFLINE QUEUE ─────────────────────────────────────────────────────────────
+function getQueue() {
+  try { return JSON.parse(localStorage.getItem('ssv_queue') || '[]'); } catch(e) { return []; }
+}
+
+function saveQueue(q) {
+  try { localStorage.setItem('ssv_queue', JSON.stringify(q)); } catch(e) {}
+}
+
+function enqueue(siteId, fields) {
+  var q = getQueue().filter(function(i) { return i.siteId !== siteId; });
+  q.push({ siteId: siteId, fields: fields, ts: Date.now() });
+  saveQueue(q);
+  updateQueueBadge();
+}
+
+function dequeue(siteId) {
+  saveQueue(getQueue().filter(function(i) { return i.siteId !== siteId; }));
+  updateQueueBadge();
+}
+
+function updateQueueBadge() {
+  var count = getQueue().length;
+  var badge = document.getElementById('queue-badge');
+  if (!badge) return;
+  if (count > 0) { badge.style.display = 'inline-block'; badge.textContent = count; }
+  else { badge.style.display = 'none'; }
+}
+
+function syncQueue() {
+  if (!navigator.onLine) return;
+  var q = getQueue();
+  if (!q.length) return;
+  q.forEach(function(item) {
+    var url = GAS_URL +
+      '?action=updateSiteData' +
+      '&key='    + encodeURIComponent(API_KEY) +
+      '&siteId=' + encodeURIComponent(item.siteId) +
+      '&fields=' + encodeURIComponent(JSON.stringify(item.fields)) +
+      '&userId=queued_update';
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+          dequeue(item.siteId);
+          bustCache('site_' + item.siteId);
+          showSuccessBanner('✅ Synced update for ' + item.siteId);
+        }
+      })
+      .catch(function() {});
+  });
+}
+
+window.addEventListener('online', function() {
+  showSuccessBanner('🌐 Back online — syncing…');
+  syncQueue();
+});
+
+// ── PULL-TO-REFRESH ───────────────────────────────────────────────────────────
+(function() {
+  var startY = 0;
+  var pulling = false;
+  var threshold = 70;
+
+  document.addEventListener('touchstart', function(e) {
+    startY = e.touches[0].clientY;
+    pulling = window.scrollY === 0;
+  }, { passive: true });
+
+  document.addEventListener('touchend', function(e) {
+    if (!pulling) return;
+    var dy = e.changedTouches[0].clientY - startY;
+    if (dy > threshold) {
+      var active = document.querySelector('.screen.active');
+      if (!active) return;
+      var id = active.id;
+      if (id === 'screen-detail') refreshDetail();
+      else if (id === 'screen-dashboard') { dashLoaded = false; loadDashboard(); }
+      else if (id === 'screen-drill') {
+        var title = document.getElementById('drill-title').textContent;
+        showSuccessBanner('↻ Refreshed');
+      }
+    }
+    pulling = false;
+  }, { passive: true });
+})();
+
 // ── RECENT SITES (localStorage) ──────────────────────────────────────────────
 function getRecent() {
   try { return JSON.parse(localStorage.getItem('ssv_recent') || '[]'); } catch(e) { return []; }
@@ -548,8 +680,15 @@ function renderRecent() {
 }
 
 // ── SEARCH ───────────────────────────────────────────────────────────────────
+var searchDebounce = null;
 document.getElementById('search-input').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') handleSearch();
+  if (e.key === 'Enter') { clearTimeout(searchDebounce); handleSearch(); }
+});
+document.getElementById('search-input').addEventListener('input', function() {
+  clearTimeout(searchDebounce);
+  var q = this.value.trim();
+  if (q.length < 2) return;
+  searchDebounce = setTimeout(handleSearch, 350);
 });
 
 var lastSearchResults = [];
@@ -801,10 +940,13 @@ function refreshDetail() {
   if (!currentSiteId) return;
   var btn = document.querySelector('#screen-detail .back-btn[title="Refresh"]');
   if (btn) btn.style.opacity = '.4';
+  bustCache('site_' + currentSiteId);
   apiFetch('getSiteData', { siteId: currentSiteId })
     .then(function(data) {
+      setCache('site_' + currentSiteId, data);
       currentSiteData = data.site;
       renderSiteDetail(data.site);
+      hideCacheIndicator();
       if (btn) btn.style.opacity = '1';
     })
     .catch(function(err) {
@@ -843,18 +985,38 @@ function loadSite(siteId) {
   saveRecent(siteId);
   showScreen('detail');
   document.getElementById('detail-title').textContent = siteId;
-  document.getElementById('detail-content').innerHTML = skeletonDetailHtml();
 
-  apiFetch('getSiteData', { siteId: siteId })
-    .then(function(data) {
-      currentSiteId   = siteId;
-      currentSiteData = data.site;
-      renderSiteDetail(data.site);
-    })
-    .catch(function(err) {
-      document.getElementById('detail-content').innerHTML =
-        '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
-    });
+  var cached = getCached('site_' + siteId);
+  if (cached) {
+    currentSiteId   = siteId;
+    currentSiteData = cached.site;
+    renderSiteDetail(cached.site);
+    var age = getCacheAge('site_' + siteId);
+    showCacheIndicator(age);
+    // Silent background refresh
+    apiFetch('getSiteData', { siteId: siteId })
+      .then(function(data) {
+        setCache('site_' + siteId, data);
+        currentSiteData = data.site;
+        renderSiteDetail(data.site);
+        hideCacheIndicator();
+      })
+      .catch(function() {});
+  } else {
+    hideCacheIndicator();
+    document.getElementById('detail-content').innerHTML = skeletonDetailHtml();
+    apiFetch('getSiteData', { siteId: siteId })
+      .then(function(data) {
+        setCache('site_' + siteId, data);
+        currentSiteId   = siteId;
+        currentSiteData = data.site;
+        renderSiteDetail(data.site);
+      })
+      .catch(function(err) {
+        document.getElementById('detail-content').innerHTML =
+          '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+      });
+  }
 }
 
 function renderSiteDetail(s) {
@@ -938,19 +1100,33 @@ var dashLoaded = false;
 function loadDashboard() {
   if (dashLoaded) return;
   var el = document.getElementById('dashboard-content');
-  el.innerHTML = skeletonDashHtml();
 
-  Promise.all([
-    apiFetch('getDashboardSummary', {}),
-    apiFetch('getTeamBreakdown', {})
-  ])
-  .then(function(results) {
+  var cachedSummary = getCached('dash_summary');
+  var cachedTeams   = getCached('dash_teams');
+  if (cachedSummary && cachedTeams) {
     dashLoaded = true;
-    renderDashboard(results[0].summary, results[1].teams);
-  })
-  .catch(function(err) {
-    el.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
-  });
+    renderDashboard(cachedSummary, cachedTeams);
+    // Silent background refresh
+    Promise.all([apiFetch('getDashboardSummary', {}), apiFetch('getTeamBreakdown', {})])
+      .then(function(r) {
+        setCache('dash_summary', r[0].summary);
+        setCache('dash_teams',   r[1].teams);
+        renderDashboard(r[0].summary, r[1].teams);
+      }).catch(function() {});
+    return;
+  }
+
+  el.innerHTML = skeletonDashHtml();
+  Promise.all([apiFetch('getDashboardSummary', {}), apiFetch('getTeamBreakdown', {})])
+    .then(function(results) {
+      dashLoaded = true;
+      setCache('dash_summary', results[0].summary);
+      setCache('dash_teams',   results[1].teams);
+      renderDashboard(results[0].summary, results[1].teams);
+    })
+    .catch(function(err) {
+      el.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
 }
 
 function renderDashboard(s, teams) {
@@ -1299,9 +1475,8 @@ function submitUpdate() {
 
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
 
-    Object.keys(pendingFields).forEach(function(k) {
-      currentSiteData[k] = pendingFields[k];
-    });
+    Object.keys(pendingFields).forEach(function(k) { currentSiteData[k] = pendingFields[k]; });
+    bustCache('site_' + currentSiteId);
     pendingFields = {};
 
     if (tg && tg.MainButton) { tg.MainButton.hideProgress(); tg.MainButton.hide(); }
@@ -1314,8 +1489,17 @@ function submitUpdate() {
     btn.disabled = false;
     btn.textContent = '✅ Confirm & Save';
     if (tg && tg.MainButton) { tg.MainButton.hideProgress(); tg.MainButton.enable(); }
-    document.getElementById('confirm-error').innerHTML =
-      '<div class="error-msg" style="margin-top:12px;">⚠ ' + escHtml(err.message) + '</div>';
+
+    // Queue for retry if network error
+    var isNetworkErr = err.message === 'Failed to fetch' || !navigator.onLine;
+    if (isNetworkErr) {
+      enqueue(currentSiteId, pendingFields);
+      document.getElementById('confirm-error').innerHTML =
+        '<div class="error-msg" style="margin-top:12px;">📶 No connection — update saved locally and will sync when online.</div>';
+    } else {
+      document.getElementById('confirm-error').innerHTML =
+        '<div class="error-msg" style="margin-top:12px;">⚠ ' + escHtml(err.message) + '</div>';
+    }
   });
 }
 
@@ -1404,6 +1588,8 @@ function getOptions() {
 getOptions(); // warm cache immediately
 
 renderRecent();
+updateQueueBadge();
+syncQueue();
 
 // Warn if GAS_URL not set
 if (!GAS_URL) {
