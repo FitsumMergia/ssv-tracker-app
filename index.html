@@ -260,6 +260,40 @@
 
     .page-content { padding-bottom: 68px; }
 
+    /* ── Role badges ── */
+    .role-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 20px;
+      font-size: 10px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase;
+    }
+    .role-admin    { background: #fce4ec; color: #c62828; }
+    .role-engineer { background: #e3f2fd; color: #1565c0; }
+    .role-viewer   { background: #f3e5f5; color: #6a1b9a; }
+
+    /* ── User greeting ── */
+    .user-greeting {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: var(--hint); margin-bottom: 10px;
+    }
+    .user-avatar {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700; flex-shrink: 0;
+    }
+
+    /* ── User list ── */
+    .user-card {
+      background: var(--bg2); border-radius: var(--radius);
+      padding: 12px 14px; margin-bottom: 8px;
+    }
+    .user-card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .user-card-name { font-size: 14px; font-weight: 700; flex: 1; }
+    .user-card-meta { font-size: 11px; color: var(--hint); margin-bottom: 6px; }
+    .role-select {
+      background: var(--bg); border: 1.5px solid var(--bg2); border-radius: 6px;
+      padding: 5px 8px; font-size: 12px; color: var(--text); width: 100%;
+    }
+
     /* ── Audit log entries ── */
     .audit-entry {
       background: var(--bg2); border-radius: var(--radius);
@@ -336,6 +370,7 @@
 <!-- ── SEARCH SCREEN ── -->
 <div id="screen-search" class="screen active page-content">
   <div style="padding: 20px 0 8px;">
+    <div id="user-greeting" class="user-greeting" style="display:none;"></div>
     <div style="font-size: 20px; font-weight: 800; margin-bottom: 4px;">SSV Tracker</div>
     <div style="font-size: 13px; color: var(--hint);">Search a site to view or update progress</div>
   </div>
@@ -443,6 +478,15 @@
   </div>
 </div>
 
+<!-- ── USERS SCREEN ── -->
+<div id="screen-users" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('dashboard')">← Back</button>
+    <h1>Team Members</h1>
+  </div>
+  <div id="users-content" style="padding: 0 16px 16px;"></div>
+</div>
+
 <!-- ── AUDIT LOG SCREEN ── -->
 <div id="screen-audit" class="screen page-content">
   <div class="header">
@@ -476,6 +520,34 @@
 // ── CONFIG ──────────────────────────────────────────────────────────────────
 var GAS_URL  = 'https://script.google.com/macros/s/AKfycbxj44gOO6BrpAGWJ4YSmI2USsOkUPE4LBxE_1B1LQJR8HxJDSVkzYaKZd1JJMFCVO4I/exec';
 var API_KEY  = 'YWY0OGFmZGMtZmM2ZS00';
+
+// ── CURRENT USER ─────────────────────────────────────────────────────────────
+var currentUser = { role: 'Engineer', telegramId: null, username: null, firstName: null };
+
+function canUpdate() { return currentUser.role === 'Engineer' || currentUser.role === 'Admin'; }
+function isAdmin()   { return currentUser.role === 'Admin'; }
+
+function displayName() {
+  if (currentUser.firstName) return currentUser.firstName;
+  if (currentUser.username)  return '@' + currentUser.username;
+  return 'User';
+}
+
+function userId_() {
+  if (currentUser.username)   return '@' + currentUser.username;
+  if (currentUser.telegramId) return String(currentUser.telegramId);
+  return 'webapp_user';
+}
+
+function roleBadge(role) {
+  var cls = role === 'Admin' ? 'role-admin' : role === 'Viewer' ? 'role-viewer' : 'role-engineer';
+  return '<span class="role-badge ' + cls + '">' + escHtml(role) + '</span>';
+}
+
+function initials(firstName, username) {
+  var name = firstName || username || '?';
+  return name.charAt(0).toUpperCase();
+}
 
 // ── TELEGRAM INIT ────────────────────────────────────────────────────────────
 var tg = window.Telegram && window.Telegram.WebApp;
@@ -835,9 +907,7 @@ function submitQuickUpdate(field, value, label) {
     '&key='    + encodeURIComponent(API_KEY) +
     '&siteId=' + encodeURIComponent(currentSiteId) +
     '&fields=' + encodeURIComponent(JSON.stringify(fields)) +
-    '&userId=' + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
-                   ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
-                   : 'webapp_user');
+    '&userId=' + encodeURIComponent(userId_());
 
   // Optimistic UI — show loading immediately
   document.getElementById('detail-content').innerHTML = loadingHtml('Saving…');
@@ -855,6 +925,88 @@ function submitQuickUpdate(field, value, label) {
       if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
       renderSiteDetail(currentSiteData);
       document.getElementById('confirm-error');
+      showSuccessBanner('⚠ ' + err.message);
+    });
+}
+
+// ── USER MANAGEMENT ──────────────────────────────────────────────────────────
+
+function renderGreeting() {
+  var el = document.getElementById('user-greeting');
+  if (!el) return;
+  el.style.display = 'flex';
+  el.innerHTML =
+    '<div class="user-avatar">' + escHtml(initials(currentUser.firstName, currentUser.username)) + '</div>' +
+    '<span>Hi, <b>' + escHtml(displayName()) + '</b></span>' +
+    roleBadge(currentUser.role);
+}
+
+function openUsersScreen() {
+  document.getElementById('users-content').innerHTML = loadingHtml('Loading team…');
+  showScreen('users');
+
+  fetch(GAS_URL + '?action=getUsers&key=' + encodeURIComponent(API_KEY) +
+    '&requestingId=' + encodeURIComponent(currentUser.telegramId || ''))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.success) throw new Error(data.error);
+      renderUsersList(data.users);
+    })
+    .catch(function(err) {
+      document.getElementById('users-content').innerHTML =
+        '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+function renderUsersList(users) {
+  if (!users.length) {
+    document.getElementById('users-content').innerHTML =
+      '<div class="empty-msg">No users registered yet</div>';
+    return;
+  }
+
+  var html = '<div style="font-size:12px;color:var(--hint);margin:10px 0 8px;">' +
+    users.length + ' member' + (users.length !== 1 ? 's' : '') + '</div>';
+
+  html += users.map(function(u) {
+    var name = (u.firstName + ' ' + u.lastName).trim() || u.username || u.telegramId;
+    var uname = u.username ? '@' + u.username : 'ID: ' + u.telegramId;
+    var lastSeen = u.lastAccess ? fmtDate(u.lastAccess) : '—';
+    var isSelf = String(u.telegramId) === String(currentUser.telegramId);
+
+    var roleControl = isAdmin() && !isSelf
+      ? '<select class="role-select" onchange="changeUserRole(\'' + escHtml(u.telegramId) + '\',this.value)">' +
+          ['Admin','Engineer','Viewer'].map(function(r) {
+            return '<option value="' + r + '"' + (u.role === r ? ' selected' : '') + '>' + r + '</option>';
+          }).join('') +
+        '</select>'
+      : roleBadge(u.role) + (isSelf ? ' <span style="font-size:10px;color:var(--hint)">(you)</span>' : '');
+
+    return '<div class="user-card">' +
+      '<div class="user-card-top">' +
+        '<div class="user-avatar">' + escHtml(initials(u.firstName, u.username)) + '</div>' +
+        '<div class="user-card-name">' + escHtml(name) + '</div>' +
+      '</div>' +
+      '<div class="user-card-meta">' + escHtml(uname) + ' · ' + u.logins + ' logins · Last: ' + escHtml(lastSeen) + '</div>' +
+      roleControl +
+    '</div>';
+  }).join('');
+
+  document.getElementById('users-content').innerHTML = html;
+}
+
+function changeUserRole(targetId, newRole) {
+  fetch(GAS_URL + '?action=setUserRole' +
+    '&key='          + encodeURIComponent(API_KEY) +
+    '&requestingId=' + encodeURIComponent(currentUser.telegramId || '') +
+    '&targetId='     + encodeURIComponent(targetId) +
+    '&role='         + encodeURIComponent(newRole))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.success) throw new Error(data.error);
+      showSuccessBanner('✅ Role updated to ' + newRole);
+    })
+    .catch(function(err) {
       showSuccessBanner('⚠ ' + err.message);
     });
 }
@@ -1070,11 +1222,15 @@ function renderSiteDetail(s) {
     ['Remarks',    s['Remarks']]
   ]);
 
-  html += renderQuickActions(s);
-  html += '<button class="btn btn-block" style="margin-top:12px;" onclick="openUpdateForm()">✏️ Full Update Form</button>';
+  if (canUpdate()) html += renderQuickActions(s);
+  if (canUpdate()) {
+    html += '<button class="btn btn-block" style="margin-top:12px;" onclick="openUpdateForm()">✏️ Full Update Form</button>';
+  }
   html += '<div style="display:flex;gap:8px;margin-top:8px;">' +
     '<button class="btn btn-outline" style="flex:1;" onclick="openAuditLog()">📋 History</button>' +
-    '<button class="btn btn-outline" style="flex:1;border-color:var(--red);color:var(--red);" onclick="openEscalation()">🚨 Flag Blocked</button>' +
+    (canUpdate()
+      ? '<button class="btn btn-outline" style="flex:1;border-color:var(--red);color:var(--red);" onclick="openEscalation()">🚨 Flag Blocked</button>'
+      : '<span style="flex:1;text-align:center;font-size:11px;color:var(--hint);padding:10px 0;">View only</span>') +
   '</div>';
 
   document.getElementById('detail-content').innerHTML = html;
@@ -1163,10 +1319,13 @@ function renderDashboard(s, teams) {
     html += '</tbody></table></div></div>';
   }
 
-  // Supervisor setup
+  // Admin panel
   html += '<div style="margin-top:14px;padding:14px;background:var(--bg2);border-radius:var(--radius);">' +
-    '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:10px;">Escalation Alerts</div>' +
+    '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:10px;">Settings</div>' +
     '<button class="btn btn-outline" style="width:100%;font-size:13px;" onclick="openSupervisorSetup()">⚙ Set Me as Supervisor</button>' +
+    (isAdmin()
+      ? '<button class="btn btn-outline" style="width:100%;font-size:13px;margin-top:8px;" onclick="openUsersScreen()">👥 Manage Team Members</button>'
+      : '') +
     '<div id="supervisor-status" style="font-size:12px;color:var(--hint);margin-top:8px;text-align:center;"></div>' +
   '</div>';
 
@@ -1464,9 +1623,7 @@ function submitUpdate() {
     '&key='    + encodeURIComponent(API_KEY) +
     '&siteId=' + encodeURIComponent(currentSiteId) +
     '&fields=' + encodeURIComponent(JSON.stringify(pendingFields)) +
-    '&userId=' + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
-                   ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
-                   : 'webapp_user');
+    '&userId=' + encodeURIComponent(userId_());
 
   fetch(url)
   .then(function(r) { return r.json(); })
@@ -1545,9 +1702,7 @@ function submitEscalation() {
     '&siteId='   + encodeURIComponent(currentSiteId) +
     '&flagType=' + encodeURIComponent(flagType) +
     '&reason='   + encodeURIComponent(reason) +
-    '&userId='   + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
-                     ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
-                     : 'webapp_user');
+    '&userId='   + encodeURIComponent(userId_());
 
   fetch(escUrl)
   .then(function(r) { return r.json(); })
@@ -1590,6 +1745,24 @@ getOptions(); // warm cache immediately
 renderRecent();
 updateQueueBadge();
 syncQueue();
+
+// ── USER REGISTRATION ────────────────────────────────────────────────────────
+(function() {
+  if (!tg || !tg.initDataUnsafe || !tg.initDataUnsafe.user) return;
+  var u = tg.initDataUnsafe.user;
+  apiFetch('registerUser', {
+    telegramId: u.id,
+    username:   u.username  || '',
+    firstName:  u.first_name || '',
+    lastName:   u.last_name  || ''
+  }).then(function(data) {
+    currentUser = data.user || currentUser;
+    currentUser.telegramId = u.id;
+    currentUser.username   = u.username   || null;
+    currentUser.firstName  = u.first_name || null;
+    renderGreeting();
+  }).catch(function() {});
+})();
 
 // Warn if GAS_URL not set
 if (!GAS_URL) {
