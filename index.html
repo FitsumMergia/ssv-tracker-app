@@ -935,10 +935,23 @@ function renderGreeting() {
   var el = document.getElementById('user-greeting');
   if (!el) return;
   el.style.display = 'flex';
+  var idNote = currentUser.telegramId
+    ? ' <span style="font-size:10px;color:var(--hint);cursor:pointer;" onclick="copyTelegramId()" title="Tap to copy your Telegram ID">(ID: ' + currentUser.telegramId + ')</span>'
+    : '';
   el.innerHTML =
     '<div class="user-avatar">' + escHtml(initials(currentUser.firstName, currentUser.username)) + '</div>' +
-    '<span>Hi, <b>' + escHtml(displayName()) + '</b></span>' +
+    '<span>Hi, <b>' + escHtml(displayName()) + '</b>' + idNote + '</span>' +
     roleBadge(currentUser.role);
+}
+
+function copyTelegramId() {
+  if (!currentUser.telegramId) return;
+  var id = String(currentUser.telegramId);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(id).then(function() { showSuccessBanner('✅ ID ' + id + ' copied'); });
+  } else {
+    showSuccessBanner('Your Telegram ID: ' + id);
+  }
 }
 
 function openUsersScreen() {
