@@ -867,7 +867,14 @@ function goToConfirm() {
   });
 
   if (!Object.keys(changed).length) {
-    alert('No changes made yet.');
+    showScreen('form');
+    var errBanner = document.createElement('div');
+    errBanner.style.cssText = 'position:fixed;top:16px;left:16px;right:16px;background:#fff3f3;' +
+      'border:1px solid #ffcdd2;border-radius:10px;padding:12px 16px;font-size:13px;' +
+      'color:var(--red);font-weight:600;z-index:99;text-align:center;';
+    errBanner.textContent = 'No changes made. Edit a field first.';
+    document.body.appendChild(errBanner);
+    setTimeout(function() { errBanner.remove(); }, 3000);
     return;
   }
 
