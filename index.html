@@ -393,7 +393,8 @@
 
 <script>
 // ── CONFIG ──────────────────────────────────────────────────────────────────
-var GAS_URL = 'https://script.google.com/macros/s/AKfycbxj44gOO6BrpAGWJ4YSmI2USsOkUPE4LBxE_1B1LQJR8HxJDSVkzYaKZd1JJMFCVO4I/exec';
+var GAS_URL  = 'https://script.google.com/macros/s/AKfycbxj44gOO6BrpAGWJ4YSmI2USsOkUPE4LBxE_1B1LQJR8HxJDSVkzYaKZd1JJMFCVO4I/exec';
+var API_KEY  = 'YWY0OGFmZGMtZmM2ZS00';
 
 // ── TELEGRAM INIT ────────────────────────────────────────────────────────────
 var tg = window.Telegram && window.Telegram.WebApp;
@@ -657,6 +658,22 @@ function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Convert any date format to YYYY-MM-DD for <input type="date"> value
+function toISODate(val) {
+  if (!val) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);
+  var m = val.match(/^(\d{2})-([A-Za-z]{3})-(\d{2})$/);
+  if (m) {
+    var months = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+    var mo = months[m[2]];
+    if (!mo) return '';
+    return (2000 + parseInt(m[3])) + '-' + String(mo).padStart(2,'0') + '-' + m[1];
+  }
+  var d = new Date(val);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return '';
+}
+
 // Format ISO date strings to DD-MMM-YY; pass through anything else
 function fmtDate(val) {
   if (!val) return '—';
@@ -788,8 +805,8 @@ function renderFormField(f, currentVal) {
       '<option value="No"'  + (currentVal === 'No'  ? ' selected' : '') + '>No</option>' +
       '</select>';
   } else if (f.type === 'date') {
-    input = '<input class="form-input" id="' + inputId + '" type="text" placeholder="DD-MMM-YY"' +
-      ' value="' + escHtml(currentVal) + '"' +
+    input = '<input class="form-input" id="' + inputId + '" type="date"' +
+      ' value="' + escHtml(toISODate(currentVal)) + '"' +
       ' onchange="onFieldChange(\'' + f.key + '\',this.value)"' +
       ' oninput="onFieldChange(\'' + f.key + '\',this.value)"/>';
   } else {
@@ -841,32 +858,6 @@ function goToConfirm() {
   });
   document.querySelectorAll('.field-error').forEach(function(el) { el.remove(); });
 
-  // Validate date fields
-  var firstInvalid = null;
-  var dateFields = ['On-Air Actual', 'Test Date Actual', 'Analysis Actual', 'Change Date Actual'];
-  dateFields.forEach(function(key) {
-    var inputId = 'field-' + key.replace(/\s+/g, '-');
-    var el = document.getElementById(inputId);
-    if (!el || !el.value.trim()) return;
-    var v = el.value.trim();
-    // Accept DD-MMM-YY, YYYY-MM-DD, or empty
-    var ok = /^\d{2}-[A-Za-z]{3}-\d{2}$/.test(v) || /^\d{4}-\d{2}-\d{2}/.test(v);
-    if (!ok) {
-      el.classList.add('invalid');
-      var err = document.createElement('div');
-      err.className = 'field-error';
-      err.textContent = 'Use format DD-MMM-YY (e.g. 13-Jun-26)';
-      el.parentNode.parentNode.appendChild(err);
-      if (!firstInvalid) firstInvalid = el;
-    }
-  });
-
-  if (firstInvalid) {
-    firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-    return;
-  }
-
   // Filter to only actually-changed values
   var changed = {};
   Object.keys(pendingFields).forEach(function(key) {
@@ -909,26 +900,22 @@ function submitUpdate() {
   btn.textContent = 'Saving…';
   if (tg && tg.MainButton) { tg.MainButton.showProgress(false); tg.MainButton.disable(); }
 
-  var payload = {
-    action:   'updateSiteData',
-    siteId:   currentSiteId,
-    fields:   pendingFields,
-    initData: getInitData()
-  };
+  var url = GAS_URL +
+    '?action=updateSiteData' +
+    '&key='    + encodeURIComponent(API_KEY) +
+    '&siteId=' + encodeURIComponent(currentSiteId) +
+    '&fields=' + encodeURIComponent(JSON.stringify(pendingFields)) +
+    '&userId=' + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
+                   ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
+                   : 'webapp_user');
 
-  fetch(GAS_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body:    JSON.stringify(payload)
-  })
+  fetch(url)
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (!data.success) throw new Error(data.error || 'Update failed');
 
-    // Haptic feedback
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
 
-    // Refresh cached site data with new values
     Object.keys(pendingFields).forEach(function(k) {
       currentSiteData[k] = pendingFields[k];
     });
@@ -985,19 +972,17 @@ function submitEscalation() {
   btn.textContent = 'Sending…';
   if (tg && tg.MainButton) tg.MainButton.hide();
 
-  var payload = {
-    action:   'flagEscalation',
-    siteId:   currentSiteId,
-    flagType: flagType,
-    reason:   reason,
-    initData: getInitData()
-  };
+  var escUrl = GAS_URL +
+    '?action=flagEscalation' +
+    '&key='      + encodeURIComponent(API_KEY) +
+    '&siteId='   + encodeURIComponent(currentSiteId) +
+    '&flagType=' + encodeURIComponent(flagType) +
+    '&reason='   + encodeURIComponent(reason) +
+    '&userId='   + encodeURIComponent((tg && tg.initDataUnsafe && tg.initDataUnsafe.user)
+                     ? String(tg.initDataUnsafe.user.username || tg.initDataUnsafe.user.id)
+                     : 'webapp_user');
 
-  fetch(GAS_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body:    JSON.stringify(payload)
-  })
+  fetch(escUrl)
   .then(function(r) { return r.json(); })
   .then(function(data) {
     if (!data.success) throw new Error(data.error || 'Escalation failed');
