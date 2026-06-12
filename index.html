@@ -260,6 +260,20 @@
 
     .page-content { padding-bottom: 68px; }
 
+    /* Clickable stat cards */
+    .stat-card.clickable { cursor: pointer; }
+    .stat-card.clickable:active { opacity: .72; transform: scale(.97); transition: transform .1s; }
+
+    /* Filter chips for search results */
+    .filter-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 4px; }
+    .filter-chip {
+      background: var(--bg2); border-radius: 20px;
+      padding: 5px 12px; font-size: 12px; cursor: pointer;
+      color: var(--text); font-weight: 600;
+      border: 1.5px solid transparent; transition: all .15s;
+    }
+    .filter-chip.active { background: var(--accent); color: #fff; }
+
     /* Recent searches */
     .recent-label { font-size: 11px; color: var(--hint); margin: 14px 0 6px; }
     .recent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -302,6 +316,7 @@
   <div class="header">
     <button class="back-btn" onclick="showScreen('search')">← Back</button>
     <h1 id="detail-title">Site Detail</h1>
+    <button class="back-btn" style="color:var(--accent);font-size:18px;" onclick="refreshDetail()" title="Refresh">↻</button>
   </div>
   <div id="detail-content" style="padding: 0 16px 16px;"></div>
 </div>
@@ -379,6 +394,15 @@
       onclick="submitEscalation()">🚨 Send Alert to Supervisor</button>
     <div id="esc-error"></div>
   </div>
+</div>
+
+<!-- ── DRILLDOWN SCREEN ── -->
+<div id="screen-drill" class="screen page-content">
+  <div class="header">
+    <button class="back-btn" onclick="showScreen('dashboard')">← Back</button>
+    <h1 id="drill-title">Sites</h1>
+  </div>
+  <div id="drill-content" style="padding: 0 16px 16px;"></div>
 </div>
 
 <!-- ── TAB BAR ── -->
@@ -473,6 +497,9 @@ document.getElementById('search-input').addEventListener('keydown', function(e) 
   if (e.key === 'Enter') handleSearch();
 });
 
+var lastSearchResults = [];
+var activeSearchFilter = null;
+
 function handleSearch() {
   var q = document.getElementById('search-input').value.trim();
   if (!q) return;
@@ -480,24 +507,141 @@ function handleSearch() {
   var errEl = document.getElementById('search-error');
   errEl.innerHTML = '';
   container.innerHTML = loadingHtml('Searching…');
+  activeSearchFilter = null;
 
   apiFetch('searchSite', { query: q })
     .then(function(data) {
-      var results = data.results || [];
-      if (!results.length) {
+      lastSearchResults = data.results || [];
+      if (!lastSearchResults.length) {
         container.innerHTML = '<div class="empty-msg">No sites found for "' + escHtml(q) + '"</div>';
         return;
       }
-      container.innerHTML = results.map(function(r) {
-        return '<div class="result-item" onclick="loadSite(\'' + escHtml(r.siteId) + '\')">' +
-          '<div class="site-id">' + escHtml(r.siteId) + '</div>' +
-          '<div class="meta">' + [r.team, r.region, r.city, r.scopeType].filter(Boolean).map(escHtml).join(' · ') + '</div>' +
-        '</div>';
-      }).join('');
+      renderSearchResults();
     })
     .catch(function(err) {
       container.innerHTML = '';
       errEl.innerHTML = '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+function renderSearchResults() {
+  var container = document.getElementById('search-results');
+  var results = lastSearchResults;
+
+  // Build unique team chips
+  var teams = [];
+  results.forEach(function(r) {
+    if (r.team && teams.indexOf(r.team) === -1) teams.push(r.team);
+  });
+
+  var html = '';
+  if (teams.length > 1) {
+    html += '<div class="filter-bar">';
+    teams.forEach(function(team) {
+      var active = activeSearchFilter === team;
+      html += '<span class="filter-chip' + (active ? ' active' : '') +
+        '" onclick="setSearchFilter(\'' + escHtml(team) + '\')">' + escHtml(team) + '</span>';
+    });
+    if (activeSearchFilter) {
+      html += '<span class="filter-chip active" onclick="setSearchFilter(null)">✕ Clear</span>';
+    }
+    html += '</div>';
+  }
+
+  var filtered = activeSearchFilter
+    ? results.filter(function(r) { return r.team === activeSearchFilter; })
+    : results;
+
+  html += filtered.map(function(r) {
+    return '<div class="result-item" onclick="loadSite(\'' + escHtml(r.siteId) + '\')">' +
+      '<div class="site-id">' + escHtml(r.siteId) + '</div>' +
+      '<div class="meta">' + [r.team, r.region, r.city, r.scopeType].filter(Boolean).map(escHtml).join(' · ') + '</div>' +
+    '</div>';
+  }).join('');
+
+  container.innerHTML = html;
+}
+
+function setSearchFilter(team) {
+  activeSearchFilter = team;
+  renderSearchResults();
+}
+
+// ── DRILLDOWN ────────────────────────────────────────────────────────────────
+
+function openDrilldown(field, value, title) {
+  document.getElementById('drill-title').textContent = title;
+  document.getElementById('drill-content').innerHTML = loadingHtml('Loading sites…');
+  showScreen('drill');
+
+  apiFetch('getSitesByStatus', { field: field, value: value })
+    .then(function(data) {
+      var sites = data.sites || [];
+      if (!sites.length) {
+        document.getElementById('drill-content').innerHTML = '<div class="empty-msg">No sites in this category</div>';
+        return;
+      }
+      var html = '<div style="font-size:12px;color:var(--hint);margin:10px 0 8px;">' + sites.length + ' site' + (sites.length !== 1 ? 's' : '') + '</div>';
+      html += sites.map(function(r) {
+        return '<div class="result-item" onclick="loadSiteFromDrill(\'' + escHtml(r.siteId) + '\')">' +
+          '<div class="site-id">' + escHtml(r.siteId) + '</div>' +
+          '<div class="meta">' + [r.team, r.region, r.city].filter(Boolean).map(escHtml).join(' · ') + '</div>' +
+        '</div>';
+      }).join('');
+      document.getElementById('drill-content').innerHTML = html;
+    })
+    .catch(function(err) {
+      document.getElementById('drill-content').innerHTML =
+        '<div class="error-msg">⚠ ' + escHtml(err.message) + '</div>';
+    });
+}
+
+function loadSiteFromDrill(siteId) {
+  // Override back button to return to drilldown instead of search
+  document.querySelector('#screen-detail .back-btn').onclick = function() { showScreen('drill'); };
+  loadSite(siteId);
+}
+
+// ── REFRESH ───────────────────────────────────────────────────────────────────
+
+function refreshDetail() {
+  if (!currentSiteId) return;
+  var btn = document.querySelector('#screen-detail .back-btn[title="Refresh"]');
+  if (btn) btn.style.opacity = '.4';
+  apiFetch('getSiteData', { siteId: currentSiteId })
+    .then(function(data) {
+      currentSiteData = data.site;
+      renderSiteDetail(data.site);
+      if (btn) btn.style.opacity = '1';
+    })
+    .catch(function(err) {
+      if (btn) btn.style.opacity = '1';
+      showSuccessBanner('⚠ Refresh failed: ' + err.message);
+    });
+}
+
+// ── SUPERVISOR SETUP ──────────────────────────────────────────────────────────
+
+function openSupervisorSetup() {
+  var statusEl = document.getElementById('supervisor-status');
+  if (!tg || !tg.initDataUnsafe || !tg.initDataUnsafe.user) {
+    statusEl.innerHTML = '<span style="color:var(--red);">⚠ Open inside Telegram to use this feature.</span>';
+    return;
+  }
+  var user   = tg.initDataUnsafe.user;
+  var chatId = String(user.id);
+  var name   = user.username ? '@' + user.username : (user.first_name || chatId);
+
+  statusEl.innerHTML = 'Setting <b>' + escHtml(name) + '</b> as supervisor…';
+
+  fetch(GAS_URL + '?action=setSupervisor&key=' + encodeURIComponent(API_KEY) + '&chatId=' + encodeURIComponent(chatId))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.success) throw new Error(data.error);
+      statusEl.innerHTML = '<span style="color:var(--green);">✓ ' + escHtml(name) + ' will receive escalation alerts</span>';
+    })
+    .catch(function(err) {
+      statusEl.innerHTML = '<span style="color:var(--red);">⚠ ' + escHtml(err.message) + '</span>';
     });
 }
 
@@ -612,18 +756,24 @@ function loadDashboard() {
 function renderDashboard(s) {
   var html =
     '<div class="dash-grid">' +
-      statCard(s.total,               'Total Sites',       'blue')   +
-      statCard(s.onAir,               'On-Air',            'green')  +
-      statCard(s.testDone,            'Tests Done',        'blue')   +
-      statCard(s.ssvPassed,           'SSV Passed',        'green')  +
-      statCard(s.interventionRequired,'Interventions',     'orange') +
-      statCard(s.pending,             'Pending SSV',       'red')    +
+      statCard(s.total,                'Total Sites',   'blue',   'openDrilldown("total","","All Sites")')               +
+      statCard(s.onAir,                'On-Air',        'green',  'openDrilldown("Site On-Air","Yes","On-Air Sites")')   +
+      statCard(s.testDone,             'Tests Done',    'blue',   'openDrilldown("Test Finished","Yes","Tests Done")')   +
+      statCard(s.ssvPassed,            'SSV Passed',    'green',  'openDrilldown("SSV Passed","Yes","SSV Passed")')      +
+      statCard(s.interventionRequired, 'Interventions', 'orange', 'openDrilldown("Intervention Req.","Yes","Interventions Required")') +
+      statCard(s.pending,              'Pending SSV',   'red',    'openDrilldown("SSV Passed","pending","Pending SSV")') +
+    '</div>' +
+    '<div style="margin-top:20px;padding:14px;background:var(--bg2);border-radius:var(--radius);">' +
+      '<div style="font-size:11px;font-weight:700;letter-spacing:.8px;color:var(--hint);text-transform:uppercase;margin-bottom:10px;">Escalation Alerts</div>' +
+      '<button class="btn btn-outline" style="width:100%;font-size:13px;" onclick="openSupervisorSetup()">⚙ Set Me as Supervisor</button>' +
+      '<div id="supervisor-status" style="font-size:12px;color:var(--hint);margin-top:8px;text-align:center;"></div>' +
     '</div>';
   document.getElementById('dashboard-content').innerHTML = html;
 }
 
-function statCard(num, label, color) {
-  return '<div class="stat-card ' + color + '">' +
+function statCard(num, label, color, onclick) {
+  return '<div class="stat-card ' + color + (onclick ? ' clickable' : '') + '"' +
+    (onclick ? ' onclick=\'' + onclick + '\'' : '') + '>' +
     '<div class="num">' + (num || 0) + '</div>' +
     '<div class="label">' + label + '</div>' +
   '</div>';
